@@ -91,6 +91,112 @@ signal.signal(signal.SIGTERM, signal_handler)  # Termination
 # Register cleanup function to run on exit
 atexit.register(cleanup_output)
 
+# Course request data - can be from form or API
+SAMPLE_COURSE_REQUEST = {
+    "course_title": "Introduction to Artificial Intelligence",
+    "course_description": "This course provides a comprehensive introduction to Artificial Intelligence (AI), covering its foundations, history, and modern applications. Students will explore core AI concepts including problem-solving, search, knowledge representation, machine learning, and ethical implications of AI. Emphasis is placed on both theoretical underpinnings and practical applications across domains such as healthcare, business, and education. By the end of the course, students will be able to critically evaluate AI systems and demonstrate foundational skills in designing and applying AI techniques.",
+    "course_credits": 3,
+    "course_duration_weeks": 16,
+    "course_level": "Undergraduate - Introductory",
+    "course_expectations": "Students are expected to actively participate in discussions, complete weekly assignments, and engage with hands-on exercises. No prior AI experience is required, but familiarity with basic programming concepts (e.g., Python) and statistics is recommended. By the end of the course, students should be able to explain key AI concepts, evaluate AI applications, and demonstrate an understanding of the ethical and societal impacts of AI.",
+    "course_modules": []
+}
+
+# HAILEI proprietary frameworks
+KDKA_FRAMEWORK = {
+    "summary": "KDKA aligns Knowledge, Delivery, Context, and Assessment so learning design centers the learner, not the teacher, and remains constructively aligned across modalities.",
+    "pedagogical_basis": [
+        "Learning is dynamic and contextual; design must connect content to learner needs.",
+        "Delivery should span multiple modalities with accessibility in mind.",
+        "Assessment must include formative and summative evidence aligned to outcomes."
+    ],
+    "how_to_use": "For each module, explicitly list target knowledge, choose delivery modes that fit learners and constraints, situate activities in authentic contexts, and align assessments to the stated outcomes.",
+    "dimensions": {
+        "knowledge": "Facts, concepts, skills, and metacognition tied to outcomes and Bloom levels.",
+        "delivery": "Modalities and methods such as micro-lectures, labs, peer discussion, debates.",
+        "context": "Authentic scenarios, stakeholders, constraints, and equity considerations.",
+        "assessment": "Formative and summative checks aligned to outcomes; transparent criteria."
+    },
+    "ai_course_defaults": {
+        "knowledge_examples": [
+            "AI taxonomy and task types",
+            "Data→Model→Prediction pipeline",
+            "Evaluation metrics and tradeoffs",
+            "Ethics, privacy, fairness, and responsible use"
+        ],
+        "delivery_examples": [
+            "Short micro-lectures with transcripts",
+            "Guided Colab notebooks with prewritten cells",
+            "Case walkthroughs and think pair share",
+            "Debate or fishbowl on policy topics"
+        ],
+        "context_examples": [
+            "Campus services using AI (tutoring chatbots, search ranking)",
+            "Sector cases (health, finance, arts, public sector)",
+            "Stakeholder memos for non expert audiences"
+        ],
+        "assessment_examples": [
+            "Auto graded quizzes for concepts",
+            "Dataset cards and case memos",
+            "Lab checkpoints with screenshots and rationale",
+            "Final non expert brief and presentation"
+        ]
+    },
+    "accessibility_equity_ethics": [
+        "Provide transcripts, alt text, and low bandwidth materials.",
+        "Avoid PII in datasets; document consent and provenance.",
+        "Offer multiple demonstration modes for the same competency."
+    ],
+    "notes": "Use this object as shared context for agents to ensure consistent alignment across weekly modules and artifacts."
+}
+
+PRRR_FRAMEWORK = {
+    "summary": "PRRR ensures each experience is Personal, Relatable, Relative, and Real to drive inclusion, engagement, and ethical relevance.",
+    "how_to_use": "Every activity should touch at least two PRRR dimensions. Make relevance explicit in prompts, rubrics, and feedback.",
+    "dimensions": {
+        "personal": "Elicit prior experiences, goals, and choice of dataset/topic.",
+        "relatable": "Use analogies and cross disciplinary links that honor diverse perspectives.",
+        "relative": "Compare options, methods, metrics, risks, and benefits.",
+        "real_world": "Anchor tasks in authentic stakeholders, decisions, and constraints."
+    },
+    "infusion_prompts": [
+        "Personal Describe an AI tool you used recently. What did it help with and where did it fall short",
+        "Relatable Explain training vs inference using a familiar analogy such as studying vs taking an exam",
+        "Relative For your scenario which error is worse false positive or false negative and why",
+        "Real world Draft an email advising a non expert on adopting an AI tool with benefits risks and mitigations",
+        "Relatable Compare classification to sorting mail and regression to estimating delivery time",
+        "Relative Choose two models and justify a recommendation using stakeholder aligned metrics"
+    ],
+    "ai_course_defaults": {
+        "personalization_levers": [
+            "Student selected open datasets aligned to major",
+            "Choice of use case domain per module",
+            "Reflection on value tradeoffs and comfort with risk"
+        ],
+        "relatability_patterns": [
+            "Everyday analogies for core concepts",
+            "Examples from multiple cultures and sectors",
+            "Visuals and stories before formalism"
+        ],
+        "relative_frameworks": [
+            "Confusion matrix plus cost framing",
+            "Model comparison tables with metrics and tradeoffs",
+            "Human rules vs data driven approaches"
+        ],
+        "real_world_outputs": [
+            "Dataset cards and risk registers",
+            "Stakeholder briefs and one pagers",
+            "Policy snippets and responsible use guidelines"
+        ]
+    },
+    "ethics_guardrails": [
+        "Disclose limitations and uncertainty.",
+        "Avoid sensitive data; document assumptions and mitigations.",
+        "Encourage respectful debate and multiple viewpoints."
+    ],
+    "notes": "Use this object to embed PRRR signals in prompts, examples, rubrics, and peer review so relevance stays visible and accountable."
+}
+
 print("[DEBUG] Starting main.py execution")
 print("[DEBUG] Output capture and signal handlers initialized")
 
@@ -119,118 +225,12 @@ except Exception as e:
 if __name__ == "__main__":
     try:
         print("[DEBUG] Entering main execution block")
-        
-        # Course request data - can be from form or API
-        course_request = {
-            "course_title": "Introduction to Artificial Intelligence",
-            "course_description": "This course provides a comprehensive introduction to Artificial Intelligence (AI), covering its foundations, history, and modern applications. Students will explore core AI concepts including problem-solving, search, knowledge representation, machine learning, and ethical implications of AI. Emphasis is placed on both theoretical underpinnings and practical applications across domains such as healthcare, business, and education. By the end of the course, students will be able to critically evaluate AI systems and demonstrate foundational skills in designing and applying AI techniques.",
-            "course_credits": 3,
-            "course_duration_weeks": 16,
-            "course_level": "Undergraduate - Introductory",
-            "course_expectations": "Students are expected to actively participate in discussions, complete weekly assignments, and engage with hands-on exercises. No prior AI experience is required, but familiarity with basic programming concepts (e.g., Python) and statistics is recommended. By the end of the course, students should be able to explain key AI concepts, evaluate AI applications, and demonstrate an understanding of the ethical and societal impacts of AI.",
-            "course_modules": []
-        }
-
-        # HAILEI proprietary frameworks
-        kdka_framework = {
-            "summary": "KDKA aligns Knowledge, Delivery, Context, and Assessment so learning design centers the learner, not the teacher, and remains constructively aligned across modalities.",
-            "pedagogical_basis": [
-                "Learning is dynamic and contextual; design must connect content to learner needs.",
-                "Delivery should span multiple modalities with accessibility in mind.",
-                "Assessment must include formative and summative evidence aligned to outcomes."
-            ],
-            "how_to_use": "For each module, explicitly list target knowledge, choose delivery modes that fit learners and constraints, situate activities in authentic contexts, and align assessments to the stated outcomes.",
-            "dimensions": {
-                "knowledge": "Facts, concepts, skills, and metacognition tied to outcomes and Bloom levels.",
-                "delivery": "Modalities and methods such as micro-lectures, labs, peer discussion, debates.",
-                "context": "Authentic scenarios, stakeholders, constraints, and equity considerations.",
-                "assessment": "Formative and summative checks aligned to outcomes; transparent criteria."
-            },
-            "ai_course_defaults": {
-                "knowledge_examples": [
-                    "AI taxonomy and task types",
-                    "Data→Model→Prediction pipeline",
-                    "Evaluation metrics and tradeoffs",
-                    "Ethics, privacy, fairness, and responsible use"
-                ],
-                "delivery_examples": [
-                    "Short micro-lectures with transcripts",
-                    "Guided Colab notebooks with prewritten cells",
-                    "Case walkthroughs and think pair share",
-                    "Debate or fishbowl on policy topics"
-                ],
-                "context_examples": [
-                    "Campus services using AI (tutoring chatbots, search ranking)",
-                    "Sector cases (health, finance, arts, public sector)",
-                    "Stakeholder memos for non expert audiences"
-                ],
-                "assessment_examples": [
-                    "Auto graded quizzes for concepts",
-                    "Dataset cards and case memos",
-                    "Lab checkpoints with screenshots and rationale",
-                    "Final non expert brief and presentation"
-                ]
-            },
-            "accessibility_equity_ethics": [
-                "Provide transcripts, alt text, and low bandwidth materials.",
-                "Avoid PII in datasets; document consent and provenance.",
-                "Offer multiple demonstration modes for the same competency."
-            ],
-            "notes": "Use this object as shared context for agents to ensure consistent alignment across weekly modules and artifacts."
-        }
-
-        prrr_framework = {
-            "summary": "PRRR ensures each experience is Personal, Relatable, Relative, and Real to drive inclusion, engagement, and ethical relevance.",
-            "how_to_use": "Every activity should touch at least two PRRR dimensions. Make relevance explicit in prompts, rubrics, and feedback.",
-            "dimensions": {
-                "personal": "Elicit prior experiences, goals, and choice of dataset/topic.",
-                "relatable": "Use analogies and cross disciplinary links that honor diverse perspectives.",
-                "relative": "Compare options, methods, metrics, risks, and benefits.",
-                "real_world": "Anchor tasks in authentic stakeholders, decisions, and constraints."
-            },
-            "infusion_prompts": [
-                "Personal Describe an AI tool you used recently. What did it help with and where did it fall short",
-                "Relatable Explain training vs inference using a familiar analogy such as studying vs taking an exam",
-                "Relative For your scenario which error is worse false positive or false negative and why",
-                "Real world Draft an email advising a non expert on adopting an AI tool with benefits risks and mitigations",
-                "Relatable Compare classification to sorting mail and regression to estimating delivery time",
-                "Relative Choose two models and justify a recommendation using stakeholder aligned metrics"
-            ],
-            "ai_course_defaults": {
-                "personalization_levers": [
-                    "Student selected open datasets aligned to major",
-                    "Choice of use case domain per module",
-                    "Reflection on value tradeoffs and comfort with risk"
-                ],
-                "relatability_patterns": [
-                    "Everyday analogies for core concepts",
-                    "Examples from multiple cultures and sectors",
-                    "Visuals and stories before formalism"
-                ],
-                "relative_frameworks": [
-                    "Confusion matrix plus cost framing",
-                    "Model comparison tables with metrics and tradeoffs",
-                    "Human rules vs data driven approaches"
-                ],
-                "real_world_outputs": [
-                    "Dataset cards and risk registers",
-                    "Stakeholder briefs and one pagers",
-                    "Policy snippets and responsible use guidelines"
-                ]
-            },
-            "ethics_guardrails": [
-                "Disclose limitations and uncertainty.",
-                "Avoid sensitive data; document assumptions and mitigations.",
-                "Encourage respectful debate and multiple viewpoints."
-            ],
-            "notes": "Use this object to embed PRRR signals in prompts, examples, rubrics, and peer review so relevance stays visible and accountable."
-        }
 
         print("\n[INFO] Initializing HAILEI Course Design System...")
-        print(f"[INFO] Course: {course_request['course_title']}")
-        print(f"[INFO] Credits: {course_request['course_credits']}")
-        print(f"[INFO] Duration: {course_request['course_duration_weeks']} weeks")
-        print(f"[INFO] Level: {course_request['course_level']}")
+        print(f"[INFO] Course: {SAMPLE_COURSE_REQUEST['course_title']}")
+        print(f"[INFO] Credits: {SAMPLE_COURSE_REQUEST['course_credits']}")
+        print(f"[INFO] Duration: {SAMPLE_COURSE_REQUEST['course_duration_weeks']} weeks")
+        print(f"[INFO] Level: {SAMPLE_COURSE_REQUEST['course_level']}")
 
         print("[DEBUG] About to initialize HAILEICourseDesign...")
         # Initialize HAILEI crew system
@@ -242,9 +242,9 @@ if __name__ == "__main__":
         
         # Run the complete course design process
         result = hailei_system.run_course_design(
-            course_request=course_request,
-            kdka_framework=kdka_framework,
-            prrr_framework=prrr_framework,
+            course_request=SAMPLE_COURSE_REQUEST,
+            kdka_framework=KDKA_FRAMEWORK,
+            prrr_framework=PRRR_FRAMEWORK,
             lms_platform="Canvas"  # Default LMS platform
         )
 
@@ -256,7 +256,7 @@ if __name__ == "__main__":
         
         with open(output_filename, 'w', encoding='utf-8') as f:
             f.write(f"=== HAILEI Course Design Output - {timestamp} ===\n")
-            f.write(f"Course: {course_request['course_title']}\n")
+            f.write(f"Course: {SAMPLE_COURSE_REQUEST['course_title']}\n")
             f.write(f"{'='*60}\n\n")
             f.write(str(result))
             f.write(f"\n\n{'='*60}\n")
