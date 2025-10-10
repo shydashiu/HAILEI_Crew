@@ -298,7 +298,8 @@ class ConversationalAgentFactory:
         
         for simple_name, agent_id in agent_mapping.items():
             if agent_id in self.crewai_agents:
-                orchestrator_agents[simple_name] = self.crewai_agents[agent_id]
+                # Use the full agent_id as the key for orchestrator compatibility
+                orchestrator_agents[agent_id] = self.crewai_agents[agent_id]
             else:
                 self.logger.warning(f"CrewAI agent {agent_id} not found for mapping to {simple_name}")
         

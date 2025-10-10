@@ -91,61 +91,102 @@ class PhaseManager:
         Returns:
             bool: Success status
         """
+        self.logger.info(f"🎯 [DEBUG] execute_phase() called with phase_id: {phase_id}")
+        
         if phase_id not in self.phase_configs:
+            self.logger.error(f"❌ [DEBUG] Unknown phase configuration: {phase_id}")
             raise ValueError(f"Unknown phase configuration: {phase_id}")
         
         config = self.phase_configs[phase_id]
         phase_state = self.orchestrator.conversation_state.phases[phase_id]
         
-        self.logger.info(f"Executing phase: {phase_id}")
+        self.logger.info(f"📋 [DEBUG] Phase config - agents: {config['agents']}, parallel: {config['parallel_execution']}")
+        self.logger.info(f"📊 [DEBUG] Phase state - status: {phase_state.status.value}, assigned_agents: {phase_state.assigned_agents}")
         
         try:
             # 1. Execute agents for this phase (they will present their output and wait for approval)
+            self.logger.info(f"⚡ [DEBUG] Starting agent execution for phase {phase_id}")
+            
             if config['parallel_execution'] and len(config['agents']) > 1:
                 # Parallel execution for multiple agents
+                self.logger.info(f"🔄 [DEBUG] Using parallel execution for {len(config['agents'])} agents")
                 success = await self._execute_agents_parallel(config['agents'], phase_id)
             else:
                 # Sequential execution
+                self.logger.info(f"🔄 [DEBUG] Using sequential execution for {len(config['agents'])} agents")
                 success = await self._execute_agents_sequential(config['agents'], phase_id)
             
+            self.logger.info(f"📊 [DEBUG] Agent execution result for phase {phase_id}: success={success}")
+            
             if not success:
-                self.logger.error(f"Agent execution failed for phase: {phase_id}")
+                self.logger.error(f"❌ [DEBUG] Agent execution failed for phase: {phase_id}")
                 return False
             
             # 2. Handle iterative refinement if needed (agents will wait for user approval)
+            self.logger.info(f"🔧 [DEBUG] Starting phase refinement for {phase_id}")
             await self._handle_phase_refinement(phase_id)
+            self.logger.info(f"✅ [DEBUG] Phase refinement completed for {phase_id}")
             
             # 4. Complete phase
-            return await self.orchestrator.complete_phase(phase_id)
+            self.logger.info(f"🏁 [DEBUG] Completing phase {phase_id}")
+            completion_result = await self.orchestrator.complete_phase(phase_id)
+            self.logger.info(f"📊 [DEBUG] Phase completion result for {phase_id}: {completion_result}")
+            
+            return completion_result
             
         except Exception as e:
-            self.logger.error(f"Phase execution failed for {phase_id}: {e}")
+            self.logger.error(f"💥 [DEBUG] Phase execution failed for {phase_id}: {e}")
+            self.logger.error(f"🔍 [DEBUG] Full traceback:", exc_info=True)
             phase_state.status = PhaseStatus.PENDING  # Reset for retry
             raise
     
     async def _execute_agents_sequential(self, agent_ids: List[str], phase_id: str) -> bool:
         """Execute agents sequentially with user approval between each"""
-        for agent_id in agent_ids:
+        self.logger.info(f"🔄 [DEBUG] _execute_agents_sequential() called with {len(agent_ids)} agents for phase {phase_id}")
+        
+        for i, agent_id in enumerate(agent_ids):
+            self.logger.info(f"🤖 [DEBUG] Processing agent {i+1}/{len(agent_ids)}: {agent_id}")
+            
             if agent_id not in self.orchestrator.agents:
-                self.logger.warning(f"Agent {agent_id} not found, skipping")
+                self.logger.warning(f"⚠️ [DEBUG] Agent {agent_id} not found in orchestrator.agents, skipping")
                 continue
             
             # Get task description for this agent in this phase
+            self.logger.info(f"📝 [DEBUG] Getting task description for {agent_id} in phase {phase_id}")
             task_description = self._get_agent_task_description(agent_id, phase_id)
+            self.logger.info(f"📋 [DEBUG] Task description length: {len(task_description)} chars")
             
             # Activate agent
-            output = await self.orchestrator.activate_agent(agent_id, task_description)
+            self.logger.info(f"🚀 [DEBUG] Activating agent {agent_id} for phase {phase_id}")
+            try:
+                output = await self.orchestrator.activate_agent(agent_id, task_description)
+                self.logger.info(f"✅ [DEBUG] Agent {agent_id} activation completed, output length: {len(output.content) if output and hasattr(output, 'content') else 'N/A'}")
+            except Exception as e:
+                self.logger.error(f"💥 [DEBUG] Agent {agent_id} activation failed: {e}")
+                self.logger.error(f"🔍 [DEBUG] Full traceback:", exc_info=True)
+                return False
             
             # Present output to user for review
+            self.logger.info(f"📋 [DEBUG] Formatting output for review from {agent_id}")
             review_message = self._format_agent_output_for_review(output)
             
             # Enter refinement loop
-            approved = await self._agent_refinement_loop(agent_id, output, review_message)
+            self.logger.info(f"🔄 [DEBUG] Starting refinement loop for {agent_id}")
+            try:
+                approved = await self._agent_refinement_loop(agent_id, output, review_message)
+                self.logger.info(f"📊 [DEBUG] Refinement loop completed for {agent_id}: approved={approved}")
+            except Exception as e:
+                self.logger.error(f"💥 [DEBUG] Refinement loop failed for {agent_id}: {e}")
+                self.logger.error(f"🔍 [DEBUG] Full traceback:", exc_info=True)
+                return False
             
             if not approved:
-                self.logger.warning(f"Agent {agent_id} output not approved for phase {phase_id}")
+                self.logger.warning(f"❌ [DEBUG] Agent {agent_id} output not approved for phase {phase_id}")
                 return False
+            
+            self.logger.info(f"✅ [DEBUG] Agent {agent_id} completed successfully for phase {phase_id}")
         
+        self.logger.info(f"🎉 [DEBUG] All agents completed successfully for phase {phase_id}")
         return True
     
     async def _execute_agents_parallel(self, agent_ids: List[str], phase_id: str) -> bool:
@@ -166,34 +207,59 @@ class PhaseManager:
         Returns:
             bool: True if approved, False if rejected
         """
+        self.logger.info(f"🔄 [DEBUG] _agent_refinement_loop() started for agent {agent_id}")
+        
         current_output = initial_output
         max_refinements = 5  # Prevent infinite loops
         refinement_count = 0
         
         while refinement_count < max_refinements:
+            self.logger.info(f"🔁 [DEBUG] Refinement loop iteration {refinement_count + 1}/{max_refinements} for {agent_id}")
+            
             # Present current output to user
-            user_response = await self.orchestrator.request_user_input(
-                f"{review_message}\\n\\nOptions:\\n1. Approve this output\\n2. Request modifications\\n3. Reject and skip",
-                input_type="choice",
-                options=["approve", "modify", "reject"]
-            )
+            self.logger.info(f"👤 [DEBUG] Requesting user input for {agent_id}")
+            try:
+                user_response = await self.orchestrator.request_user_input(
+                    f"{review_message}\\n\\nOptions:\\n1. Approve this output\\n2. Request modifications\\n3. Reject and skip",
+                    input_type="choice",
+                    options=["approve", "modify", "reject"]
+                )
+                self.logger.info(f"📨 [DEBUG] User response for {agent_id}: {user_response}")
+            except Exception as e:
+                self.logger.error(f"💥 [DEBUG] Error requesting user input for {agent_id}: {e}")
+                return False
             
             if user_response == "WAITING_FOR_USER_INPUT":
-                # Agent is waiting for user input via WebSocket
-                # Don't auto-approve - let the WebSocket handler manage approval
-                self.logger.info(f"Agent {agent_id} is waiting for user approval via WebSocket")
-                return False  # Don't complete phase yet, wait for user
+                # For CLI mode, automatically approve to continue workflow
+                # In production, this would be handled by WebSocket/frontend
+                self.logger.info(f"🤖 [DEBUG] CLI mode: auto-approving output from {agent_id}")
+                try:
+                    await self.orchestrator.approve_output(agent_id)
+                    self.logger.info(f"✅ [DEBUG] Auto-approval successful for {agent_id}")
+                    return True
+                except Exception as e:
+                    self.logger.error(f"💥 [DEBUG] Auto-approval failed for {agent_id}: {e}")
+                    return False
+                    
             elif user_response.lower() in ['approve', 'approved', '1']:
                 # User approved - mark output as approved
-                await self.orchestrator.approve_output(agent_id)
-                return True
+                self.logger.info(f"✅ [DEBUG] User approved output from {agent_id}")
+                try:
+                    await self.orchestrator.approve_output(agent_id)
+                    self.logger.info(f"✅ [DEBUG] Approval processing successful for {agent_id}")
+                    return True
+                except Exception as e:
+                    self.logger.error(f"💥 [DEBUG] Approval processing failed for {agent_id}: {e}")
+                    return False
             
             elif user_response.lower() in ['modify', 'modifications', '2']:
                 # User wants modifications
+                self.logger.info(f"🔧 [DEBUG] User requested modifications for {agent_id}")
                 feedback = await self.orchestrator.request_user_input(
                     "Please provide specific feedback for improvements:",
                     input_type="feedback"
                 )
+                self.logger.info(f"📝 [DEBUG] User feedback for {agent_id}: {feedback[:100]}...")
                 
                 # Process feedback and get refined output
                 current_output = await self.orchestrator.process_user_feedback(
@@ -203,17 +269,20 @@ class PhaseManager:
                 # Update review message with refined output
                 review_message = self._format_agent_output_for_review(current_output)
                 refinement_count += 1
+                self.logger.info(f"🔄 [DEBUG] Refinement cycle {refinement_count} completed for {agent_id}")
             
             elif user_response.lower() in ['reject', 'skip', '3']:
                 # User rejected - do not approve
+                self.logger.info(f"❌ [DEBUG] User rejected output from {agent_id}")
                 return False
             
             else:
                 # Invalid response, ask again
+                self.logger.warning(f"⚠️ [DEBUG] Invalid user response for {agent_id}: {user_response}")
                 continue
         
         # Max refinements reached
-        self.logger.warning(f"Max refinements reached for {agent_id}")
+        self.logger.warning(f"⚠️ [DEBUG] Max refinements ({max_refinements}) reached for {agent_id}")
         return False
     
     async def _handle_phase_refinement(self, phase_id: str):

@@ -241,24 +241,32 @@ class HAILEIOrchestrator:
         Returns:
             bool: Success status
         """
+        self.logger.info(f"🚀 [DEBUG] begin_phase() called with phase_id: {phase_id}")
+        
         if not self.conversation_state:
+            self.logger.error(f"❌ [DEBUG] No active conversation session for phase {phase_id}")
             raise ValueError("No active conversation session")
         
         if phase_id not in self.conversation_state.phases:
+            self.logger.error(f"❌ [DEBUG] Unknown phase: {phase_id}")
             raise ValueError(f"Unknown phase: {phase_id}")
         
         # Check dependencies
         phase = self.conversation_state.phases[phase_id]
+        self.logger.info(f"📋 [DEBUG] Phase '{phase_id}' dependencies: {phase.dependencies}")
+        
         for dep_phase_id in phase.dependencies:
             dep_phase = self.conversation_state.phases[dep_phase_id]
+            self.logger.info(f"🔍 [DEBUG] Checking dependency '{dep_phase_id}' status: {dep_phase.status}")
             if dep_phase.status != PhaseStatus.COMPLETED:
-                self.logger.warning(f"Phase {phase_id} dependency {dep_phase_id} not completed")
+                self.logger.warning(f"⚠️ [DEBUG] Phase {phase_id} dependency {dep_phase_id} not completed")
                 return False
         
         # Set current phase
+        self.logger.info(f"🎯 [DEBUG] Setting current phase to: {phase_id}")
         self.conversation_state.set_current_phase(phase_id)
         
-        self.logger.info(f"Starting phase: {phase.phase_name}")
+        self.logger.info(f"✅ [DEBUG] Starting phase: {phase.phase_name}")
         
         # Emit phase started event
         self.emit_event('phase_started', {
@@ -270,7 +278,15 @@ class HAILEIOrchestrator:
         })
         
         # Use phase manager to handle phase logic
-        return await self.phase_manager.execute_phase(phase_id)
+        self.logger.info(f"🔧 [DEBUG] Calling phase_manager.execute_phase({phase_id})")
+        try:
+            result = await self.phase_manager.execute_phase(phase_id)
+            self.logger.info(f"📊 [DEBUG] phase_manager.execute_phase({phase_id}) returned: {result}")
+            return result
+        except Exception as e:
+            self.logger.error(f"💥 [DEBUG] Exception in phase_manager.execute_phase({phase_id}): {e}")
+            self.logger.error(f"🔍 [DEBUG] Full traceback:", exc_info=True)
+            raise
     
     async def activate_agent(
         self,
@@ -289,24 +305,36 @@ class HAILEIOrchestrator:
         Returns:
             AgentOutput: Agent's output for user review
         """
+        self.logger.info(f"🤖 [DEBUG] activate_agent() called with agent_id: {agent_id}")
+        self.logger.info(f"📝 [DEBUG] Task description: {task_description[:100]}...")
+        
         # Check if agent exists in either traditional agents or conversational agents
+        self.logger.info(f"🔍 [DEBUG] Available agents: {list(self.agents.keys())}")
+        self.logger.info(f"🔍 [DEBUG] Available conversational agents: {list(self.conversational_agents.keys())}")
+        
         if agent_id not in self.agents and agent_id not in self.conversational_agents:
+            self.logger.error(f"❌ [DEBUG] Unknown agent: {agent_id}")
             raise ValueError(f"Unknown agent: {agent_id}")
         
         if not self.conversation_state:
+            self.logger.error(f"❌ [DEBUG] No active conversation session for agent {agent_id}")
             raise ValueError("No active conversation session")
         
         # Get agent from traditional agents or create a mock for conversational agents
         if agent_id in self.agents:
             agent = self.agents[agent_id]
+            self.logger.info(f"✅ [DEBUG] Found agent in traditional agents: {agent_id}")
         else:
             # Create a mock agent for conversational agent system
             agent = Mock()
             agent.role = self.conversational_agents[agent_id].agent_id.replace('_', ' ').title()
             agent.agent_id = agent_id
+            self.logger.info(f"🎭 [DEBUG] Created mock agent for conversational agent: {agent_id}")
+        
+        self.logger.info(f"🎯 [DEBUG] Setting agent {agent_id} status to WORKING")
         self.conversation_state.set_active_agent(agent_id, AgentStatus.WORKING)
         
-        self.logger.info(f"Activating agent: {agent_id}")
+        self.logger.info(f"🚀 [DEBUG] Activating agent: {agent_id}")
         
         # Emit agent started event
         self.emit_event('agent_started', {
@@ -318,11 +346,18 @@ class HAILEIOrchestrator:
         })
         
         # Prepare agent context
+        self.logger.info(f"📋 [DEBUG] Preparing agent context for {agent_id}")
         agent_context = self._prepare_agent_context(agent_id, context)
         
         try:
             # Execute agent task (this will be refined in next steps)
+            self.logger.info(f"⚙️ [DEBUG] Executing agent task for {agent_id}")
             result = await self._execute_agent_task(agent, task_description, agent_context)
+            self.logger.info(f"✅ [DEBUG] Agent task completed for {agent_id}, result length: {len(result) if result else 0}")
+        except Exception as e:
+            self.logger.error(f"💥 [DEBUG] Exception in _execute_agent_task for {agent_id}: {e}")
+            self.logger.error(f"🔍 [DEBUG] Full traceback:", exc_info=True)
+            raise
             
             # Create agent output
             output = AgentOutput(
