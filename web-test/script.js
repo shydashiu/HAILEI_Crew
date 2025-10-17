@@ -1,433 +1,764 @@
-// HAILEI Chat Interface JavaScript
-
-class HAILEIChat {
+class SinglePersonaChat {
     constructor() {
         this.apiBaseUrl = 'http://localhost:8002';
+        this.wsBaseUrl = 'ws://localhost:8000';
         this.websocket = null;
-        this.sessionId = null;
-        this.isConnected = false;
-        this.currentAgent = 'coordinator';
-        
+        this.threadId = null;
+        this.websocketPath = null;
+        this.connectionAttempts = 0;
+        this.reconnectTimer = null;
+        this.pendingTurns = new Map();
+        this.handledAssistantMessages = new Set();
+        this.activeDecision = null;
+        this.stillWorkingDelay = 15000;
+
         this.initializeElements();
-        this.setupEventListeners();
-        this.updateStatus('offline', 'Ready to start');
+        this.bindEvents();
+        this.setConnectionStatus('offline', 'Offline');
     }
 
     initializeElements() {
-        // Form elements
-        this.setupContainer = document.getElementById('setup-container');
-        this.courseForm = document.getElementById('course-form');
-        this.courseTitleInput = document.getElementById('course-title');
-        this.courseLevelInput = document.getElementById('course-level');
-        this.courseDurationInput = document.getElementById('course-duration');
-        this.courseDescriptionInput = document.getElementById('course-description');
-        
-        // Chat elements
-        this.chatContainer = document.getElementById('chat-container');
-        this.messagesContainer = document.getElementById('messages-container');
+        this.startScreen = document.getElementById('start-screen');
+        this.buildScreen = document.getElementById('build-screen');
+        this.newSessionBtn = document.getElementById('new-session-btn');
+        this.threadBadge = document.getElementById('thread-badge');
+        this.statusDot = document.getElementById('status-dot');
+        this.statusLabel = document.getElementById('status-label');
+        this.connectionBanner = document.getElementById('connection-banner');
+        this.connectionBannerText = document.getElementById('connection-banner-text');
+        this.messages = document.getElementById('messages');
+        this.typingLiveRegion = document.getElementById('typing-live-region');
+        this.composer = document.getElementById('composer');
         this.messageInput = document.getElementById('message-input');
         this.sendBtn = document.getElementById('send-btn');
-        this.quickActions = document.getElementById('quick-actions');
-        
-        // Status elements
-        this.statusDot = document.querySelector('.status-dot');
-        this.statusText = document.getElementById('status-text');
-        this.activeAgentSpan = document.getElementById('active-agent');
-        this.agentRoleSpan = document.getElementById('agent-role');
-        this.sessionDisplay = document.getElementById('session-display');
-        this.connectionStatus = document.getElementById('connection-status');
-        this.connectionMessage = document.getElementById('connection-message');
     }
 
-    setupEventListeners() {
-        // Course form submission
-        this.courseForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.startSession();
+    bindEvents() {
+        this.newSessionBtn.addEventListener('click', () => {
+            this.startNewSession();
         });
 
-        // Message input
-        this.messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
-
-        // Send button
-        this.sendBtn.addEventListener('click', () => {
+        this.composer.addEventListener('submit', (event) => {
+            event.preventDefault();
             this.sendMessage();
         });
 
-        // Auto-focus message input when typing
-        document.addEventListener('keydown', (e) => {
-            if (this.chatContainer.style.display !== 'none' && 
-                !e.target.matches('input, textarea, button') && 
-                e.key.length === 1) {
-                this.messageInput.focus();
-            }
+        this.messageInput.addEventListener('input', () => {
+            this.sendBtn.disabled = !this.messageInput.value.trim();
         });
     }
 
-    updateStatus(status, message) {
-        this.statusDot.className = `status-dot ${status}`;
-        this.statusText.textContent = message;
+    setConnectionStatus(state, label) {
+        this.statusDot.classList.remove('online', 'offline', 'connecting');
+        this.statusDot.classList.add(state);
+        this.statusLabel.textContent = label;
     }
 
-    updateAgent(agentName, role) {
-        this.currentAgent = agentName;
-        this.activeAgentSpan.textContent = agentName;
-        this.agentRoleSpan.textContent = role;
-        
-        // Update agent icon based on type
-        const agentIcon = document.querySelector('.agent-icon');
-        const icons = {
-            'coordinator': '🎯',
-            'ipdai': '📋',
-            'cauthai': '✍️',
-            'tfdai': '⚙️',
-            'editorai': '📝',
-            'ethosai': '⚖️',
-            'searchai': '🔍'
-        };
-        agentIcon.textContent = icons[agentName.toLowerCase()] || '🤖';
-    }
+    async startNewSession() {
+        this.setConnectionStatus('connecting', 'Starting session…');
+        this.newSessionBtn.disabled = true;
+        this.hideConnectionBanner();
 
-    async startSession() {
         try {
-            this.updateStatus('connecting', 'Creating session...');
-            this.showConnectionStatus('Creating your course session...');
-
-            const courseData = {
-                title: this.courseTitleInput.value,
-                level: this.courseLevelInput.value,
-                duration: parseInt(this.courseDurationInput.value),
-                description: this.courseDescriptionInput.value
-            };
-
-            console.log('Creating session with data:', courseData);
-
-            const response = await fetch(`${this.apiBaseUrl}/frontend/quick-start`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(courseData)
+            const response = await fetch(`${this.apiBaseUrl}/frontend/new-session`, {
+                method: 'POST'
             });
 
             if (!response.ok) {
-                throw new Error(`Failed to create session: ${response.status} ${response.statusText}`);
+                throw new Error(`Failed to start session (${response.status})`);
             }
 
-            const sessionData = await response.json();
-            console.log('Session created:', sessionData);
+            const payload = await response.json();
+            this.threadId = payload.session_id;
+            this.websocketPath = payload.websocket_url;
+            this.threadBadge.textContent = this.threadId.slice(0, 8);
 
-            this.sessionId = sessionData.session_id;
-            this.sessionDisplay.textContent = `Session: ${this.sessionId.substring(0, 8)}...`;
+            this.showBuildScreen();
+            this.appendWelcomeMessage();
 
-            // Switch to chat interface
-            this.setupContainer.style.display = 'none';
-            this.chatContainer.style.display = 'flex';
-
-            // Connect WebSocket
             await this.connectWebSocket();
-
-            // Send initial greeting
-            this.addSystemMessage(`Course session created! I'm connecting you with the HAILEI team to design your "${courseData.title}" course.`);
-            
-            this.hideConnectionStatus();
-
         } catch (error) {
-            console.error('Error starting session:', error);
-            this.updateStatus('offline', 'Connection failed');
-            this.hideConnectionStatus();
-            alert(`Failed to start session: ${error.message}`);
+            console.error('Unable to create session', error);
+            this.setConnectionStatus('offline', 'Offline');
+            this.newSessionBtn.disabled = false;
+            this.showConnectionBanner('Something went wrong. Try again.');
         }
+    }
+
+    showBuildScreen() {
+        this.startScreen.classList.add('hidden');
+        this.buildScreen.classList.remove('hidden');
+    }
+
+    appendWelcomeMessage() {
+        const turn = document.createElement('div');
+        turn.className = 'turn';
+        const message = this.buildAssistantMessage('Welcome! I am your HAILEI Assistant. Ask anything about designing your course and I will respond in a single voice.');
+        turn.appendChild(message);
+        this.messages.appendChild(turn);
     }
 
     async connectWebSocket() {
-        try {
-            this.showConnectionStatus('Connecting to conversation...');
-            
-            const wsUrl = `ws://localhost:8000/ws/${this.sessionId}`;
-            console.log('Connecting to WebSocket:', wsUrl);
-
-            this.websocket = new WebSocket(wsUrl);
-
-            this.websocket.onopen = () => {
-                console.log('WebSocket connected');
-                this.isConnected = true;
-                this.updateStatus('online', 'Connected');
-                this.enableInput();
-                this.showQuickActions();
-                this.hideConnectionStatus();
-            };
-
-            this.websocket.onmessage = (event) => {
-                console.log('WebSocket message received:', event.data);
-                this.handleWebSocketMessage(event.data);
-            };
-
-            this.websocket.onclose = (event) => {
-                console.log('WebSocket closed:', event.code, event.reason);
-                this.isConnected = false;
-                this.updateStatus('offline', 'Disconnected');
-                this.disableInput();
-                this.hideQuickActions();
-                
-                if (event.code !== 1000) { // Not normal closure
-                    this.addSystemMessage('Connection lost. Please refresh the page to reconnect.');
-                }
-            };
-
-            this.websocket.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                this.updateStatus('offline', 'Connection error');
-                this.addSystemMessage('Connection error occurred. Please check your connection and try again.');
-            };
-
-        } catch (error) {
-            console.error('Error connecting WebSocket:', error);
-            throw error;
+        if (!this.threadId || !this.websocketPath) {
+            return;
         }
-    }
 
-    handleWebSocketMessage(data) {
-        try {
-            const message = JSON.parse(data);
-            console.log('Parsed message:', message);
+        const wsUrl = `${this.wsBaseUrl}${this.websocketPath}`;
+        this.setConnectionStatus('connecting', 'Connecting…');
+        this.showConnectionBanner('Connecting to live conversation…');
 
-            switch (message.type) {
-                case 'connection_established':
-                    console.log('Connection established:', message.message);
-                    this.addSystemMessage('Connected to HAILEI system');
-                    break;
-                    
-                case 'conversation_started':
-                    console.log('Conversation started:', message.message);
-                    this.updateAgent(message.current_agent || 'coordinator', 'Starting conversation...');
-                    this.addSystemMessage(message.message || 'Conversation started');
-                    break;
-                    
-                case 'agent_message':
-                    this.addAgentMessage(message.content, message.agent || this.currentAgent);
-                    if (message.agent) {
-                        this.updateAgentFromMessage(message.agent);
-                    }
-                    break;
-                    
-                case 'system_message':
-                    this.addSystemMessage(message.content);
-                    break;
-                    
-                case 'agent_transition':
-                    this.updateAgent(message.agent, message.role || 'Processing');
-                    this.addSystemMessage(`Now working with ${message.agent}: ${message.role || 'Processing your request'}`);
-                    break;
-                    
-                case 'error':
-                    this.addSystemMessage(`Error: ${message.content || message.message}`, 'error');
-                    break;
-                    
-                case 'echo':
-                    console.log('Message echoed:', message.original_message);
-                    // Don't display echo messages to user
-                    break;
-                    
-                case 'pong':
-                    console.log('Pong received');
-                    break;
-                    
-                case 'subscribed':
-                    console.log('Subscribed to events:', message.events);
-                    break;
-                    
-                default:
-                    // Handle plain text messages
-                    if (typeof message === 'string') {
-                        this.addAgentMessage(message, this.currentAgent);
-                    } else {
-                        console.log('Unknown message type:', message);
-                    }
-            }
-        } catch (error) {
-            // Handle plain text messages
-            this.addAgentMessage(data, this.currentAgent);
+        if (this.websocket) {
+            this.websocket.close(1000, 'Reconnecting');
         }
-    }
 
-    updateAgentFromMessage(agentName) {
-        const agentRoles = {
-            'coordinator': 'Course Coordination',
-            'ipdai': 'Instructional Design',
-            'cauthai': 'Content Creation',
-            'tfdai': 'Technical Implementation',
-            'editorai': 'Content Review',
-            'ethosai': 'Ethical Compliance',
-            'searchai': 'Resource Research'
+        this.websocket = new WebSocket(wsUrl);
+
+        this.websocket.onopen = () => {
+            this.connectionAttempts = 0;
+            this.setConnectionStatus('online', 'Connected');
+            this.hideConnectionBanner();
+            this.enableComposer();
+            this.clearReconnectTimer();
         };
-        
-        this.updateAgent(agentName, agentRoles[agentName.toLowerCase()] || 'Processing');
-    }
 
-    sendMessage() {
-        const message = this.messageInput.value.trim();
-        if (!message || !this.isConnected) return;
-
-        console.log('Sending message:', message);
-
-        // Add user message to chat
-        this.addUserMessage(message);
-
-        // Send to WebSocket
-        this.websocket.send(JSON.stringify({
-            type: 'user_message',
-            content: message,
-            timestamp: new Date().toISOString()
-        }));
-
-        // Clear input
-        this.messageInput.value = '';
-        
-        // Show typing indicator
-        this.showTypingIndicator();
-    }
-
-    sendQuickMessage(message) {
-        if (!this.isConnected) return;
-        
-        this.messageInput.value = message;
-        this.sendMessage();
-    }
-
-    addUserMessage(content) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message user';
-        messageDiv.innerHTML = `
-            <div class="message-bubble">
-                <div class="message-content">${this.escapeHtml(content)}</div>
-                <div class="message-time">${this.formatTime(new Date())}</div>
-            </div>
-        `;
-        
-        this.messagesContainer.appendChild(messageDiv);
-        this.scrollToBottom();
-    }
-
-    addAgentMessage(content, agent = 'coordinator') {
-        this.hideTypingIndicator();
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message agent';
-        
-        const agentIcons = {
-            'coordinator': '🎯',
-            'ipdai': '📋',
-            'cauthai': '✍️',
-            'tfdai': '⚙️',
-            'editorai': '📝',
-            'ethosai': '⚖️',
-            'searchai': '🔍'
+        this.websocket.onmessage = (event) => {
+            this.processServerEvent(event.data);
         };
-        
-        const icon = agentIcons[agent.toLowerCase()] || '🤖';
-        
-        messageDiv.innerHTML = `
-            <div class="agent-avatar">${icon}</div>
-            <div class="message-content">
-                <strong>${agent.toUpperCase()}</strong><br>
-                ${this.escapeHtml(content)}
-                <div class="message-time">${this.formatTime(new Date())}</div>
-            </div>
-        `;
-        
-        this.messagesContainer.appendChild(messageDiv);
-        this.scrollToBottom();
+
+        this.websocket.onerror = (event) => {
+            console.error('WebSocket error', event);
+            this.setConnectionStatus('offline', 'Connection issue');
+            this.showConnectionBanner('Something went wrong. Try again.');
+        };
+
+        this.websocket.onclose = (event) => {
+            console.warn('WebSocket closed', event.code, event.reason);
+            this.disableComposer();
+            this.setConnectionStatus('offline', 'Disconnected');
+            this.showConnectionBanner('Connection lost. Reconnecting…');
+            this.scheduleReconnect();
+        };
     }
 
-    addSystemMessage(content, type = 'info') {
-        this.hideTypingIndicator();
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message system ${type}`;
-        
-        const bgColor = type === 'error' ? '#fed7d7' : '#e6fffa';
-        const borderColor = type === 'error' ? '#feb2b2' : '#81e6d9';
-        
-        messageDiv.innerHTML = `
-            <div style="background: ${bgColor}; border: 1px solid ${borderColor}; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; width: 100%;">
-                <div class="message-content">
-                    <strong>System:</strong> ${this.escapeHtml(content)}
-                    <div class="message-time">${this.formatTime(new Date())}</div>
-                </div>
-            </div>
-        `;
-        
-        this.messagesContainer.appendChild(messageDiv);
-        this.scrollToBottom();
+    scheduleReconnect() {
+        if (!this.threadId) {
+            return;
+        }
+
+        if (this.reconnectTimer) {
+            return;
+        }
+
+        const delay = Math.min(10000, 1000 * Math.pow(2, this.connectionAttempts));
+        this.connectionAttempts += 1;
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.connectWebSocket();
+        }, delay);
     }
 
-    showTypingIndicator() {
-        this.hideTypingIndicator(); // Remove existing one
-        
-        const typingDiv = document.createElement('div');
-        typingDiv.className = 'typing-indicator';
-        typingDiv.id = 'typing-indicator';
-        typingDiv.innerHTML = `
-            <div class="agent-avatar">💭</div>
-            <div>
-                <strong>${this.currentAgent.toUpperCase()}</strong> is typing
-                <div class="typing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-            </div>
-        `;
-        
-        this.messagesContainer.appendChild(typingDiv);
-        this.scrollToBottom();
-    }
-
-    hideTypingIndicator() {
-        const typingIndicator = document.getElementById('typing-indicator');
-        if (typingIndicator) {
-            typingIndicator.remove();
+    clearReconnectTimer() {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
         }
     }
 
-    enableInput() {
+    enableComposer() {
         this.messageInput.disabled = false;
-        this.sendBtn.disabled = false;
         this.messageInput.placeholder = 'Type your message...';
+        this.sendBtn.disabled = !this.messageInput.value.trim();
         this.messageInput.focus();
     }
 
-    disableInput() {
+    disableComposer() {
         this.messageInput.disabled = true;
         this.sendBtn.disabled = true;
-        this.messageInput.placeholder = 'Disconnected...';
+        this.messageInput.placeholder = 'Reconnecting…';
     }
 
-    showQuickActions() {
-        this.quickActions.style.display = 'flex';
+    showConnectionBanner(message) {
+        this.connectionBannerText.textContent = message;
+        this.connectionBanner.classList.remove('hidden');
     }
 
-    hideQuickActions() {
-        this.quickActions.style.display = 'none';
+    hideConnectionBanner() {
+        this.connectionBanner.classList.add('hidden');
+        this.connectionBannerText.textContent = '';
     }
 
-    showConnectionStatus(message) {
-        this.connectionMessage.textContent = message;
-        this.connectionStatus.style.display = 'block';
+    sendMessage() {
+        const text = this.messageInput.value.trim();
+        if (!text) {
+            return;
+        }
+
+        if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+            this.showConnectionBanner('Still connecting… please wait.');
+            return;
+        }
+
+        this.messageInput.value = '';
+        this.sendBtn.disabled = true;
+        this.sendMessageText(text);
+        this.messageInput.focus();
     }
 
-    hideConnectionStatus() {
-        this.connectionStatus.style.display = 'none';
+    sendMessageText(text) {
+        if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+            this.showConnectionBanner('Still connecting… please wait.');
+            return;
+        }
+
+        const messageId = this.generateMessageId();
+        const turn = document.createElement('div');
+        turn.className = 'turn';
+        turn.dataset.turnId = messageId;
+
+        const userMessage = this.buildUserMessage(text);
+        turn.appendChild(userMessage);
+
+        const indicator = this.buildTypingIndicator();
+        turn.appendChild(indicator);
+
+        this.messages.appendChild(turn);
+        this.scrollToBottom();
+        this.announceTyping();
+
+        const pending = {
+            id: messageId,
+            text,
+            turnElement: turn,
+            indicator,
+            stillWorkingTimer: this.startStillWorkingTimer(indicator),
+        };
+
+        this.pendingTurns.set(messageId, pending);
+
+        const payload = {
+            type: 'user_message',
+            thread_id: this.threadId,
+            message_id: messageId,
+            text,
+        };
+
+        try {
+            this.websocket.send(JSON.stringify(payload));
+        } catch (error) {
+            console.error('Failed to send message', error);
+            this.showConnectionBanner('Something went wrong. Try again.');
+        }
+    }
+
+    processServerEvent(raw) {
+        let data = raw;
+        try {
+            data = JSON.parse(raw);
+        } catch (error) {
+            console.warn('Received non-JSON payload', raw);
+            data = raw;
+        }
+
+        const event = this.normalizeEvent(data);
+        if (!event) {
+            return;
+        }
+
+        switch (event.kind) {
+            case 'status':
+                this.handleStatusEvent(event);
+                break;
+            case 'final':
+                this.handleFinalEvent(event);
+                break;
+            case 'error':
+                this.handleErrorEvent(event);
+                break;
+            case 'system':
+                this.appendSystemMessage(event.text);
+                break;
+            default:
+                break;
+        }
+    }
+
+    normalizeEvent(message) {
+        if (!message) {
+            return null;
+        }
+
+        if (typeof message === 'string') {
+            return {
+                kind: 'final',
+                assistantMessageId: this.generateAssistantMessageId(),
+                text: message,
+                artifacts: [],
+                replyTo: this.oldestPendingTurnId(),
+            };
+        }
+
+        switch (message.type) {
+            case 'status':
+                return {
+                    kind: 'status',
+                    messageId: message.message_id || message.turn_id || message.reply_to || null,
+                    text: message.text || message.message || '',
+                };
+            case 'final':
+                return {
+                    kind: 'final',
+                    assistantMessageId: message.message_id || message.id || this.generateAssistantMessageId(),
+                    text: message.text || message.content || '',
+                    artifacts: message.artifacts || [],
+                    replyTo: message.reply_to || message.user_message_id || null,
+                };
+            case 'error':
+                return {
+                    kind: 'error',
+                    messageId: message.message_id || message.turn_id || message.reply_to || null,
+                    hint: message.hint || message.text || 'Something went wrong. Try again.',
+                };
+            case 'agent_message':
+                return {
+                    kind: 'final',
+                    assistantMessageId: message.message_id || this.generateAssistantMessageId(),
+                    text: message.content || '',
+                    artifacts: message.artifacts || [],
+                    replyTo: message.reply_to || message.user_message_id || null,
+                };
+            case 'system_message':
+                return {
+                    kind: 'system',
+                    text: message.content || message.message || '',
+                };
+            case 'conversation_started':
+            case 'connection_established':
+                return {
+                    kind: 'status',
+                    messageId: null,
+                    text: message.message || '',
+                };
+            default:
+                return null;
+        }
+    }
+
+    handleStatusEvent(event) {
+        const pendingId = event.messageId || this.latestPendingTurnId();
+        if (!pendingId) {
+            return;
+        }
+
+        const pending = this.pendingTurns.get(pendingId);
+        if (!pending) {
+            return;
+        }
+
+        if (!pending.indicator.isConnected) {
+            const indicator = this.buildTypingIndicator();
+            pending.turnElement.appendChild(indicator);
+            pending.indicator = indicator;
+        }
+
+        if (pending.stillWorkingTimer) {
+            clearTimeout(pending.stillWorkingTimer);
+        }
+        pending.stillWorkingTimer = this.startStillWorkingTimer(pending.indicator);
+
+        this.announceTyping();
+    }
+
+    handleFinalEvent(event) {
+        if (this.handledAssistantMessages.has(event.assistantMessageId)) {
+            return;
+        }
+        this.handledAssistantMessages.add(event.assistantMessageId);
+
+        const replyTo = event.replyTo || this.oldestPendingTurnId();
+        const turn = replyTo ? this.pendingTurns.get(replyTo) : null;
+
+        const assistantMessage = this.buildAssistantMessage(event.text, event.assistantMessageId, event.artifacts);
+
+        if (turn) {
+            if (turn.indicator && turn.indicator.isConnected) {
+                turn.indicator.remove();
+            }
+            if (turn.stillWorkingTimer) {
+                clearTimeout(turn.stillWorkingTimer);
+            }
+            turn.turnElement.appendChild(assistantMessage);
+            this.pendingTurns.delete(replyTo);
+        } else {
+            const container = document.createElement('div');
+            container.className = 'turn';
+            container.appendChild(assistantMessage);
+            this.messages.appendChild(container);
+        }
+
+        this.scrollToBottom();
+        this.showDecisionBar(assistantMessage, event.assistantMessageId);
+    }
+
+    handleErrorEvent(event) {
+        const pendingId = event.messageId || this.oldestPendingTurnId();
+        const pending = pendingId ? this.pendingTurns.get(pendingId) : null;
+        if (!pending) {
+            this.appendSystemMessage(event.hint || 'Something went wrong. Try again.');
+            return;
+        }
+
+        if (pending.indicator && pending.indicator.isConnected) {
+            pending.indicator.remove();
+        }
+        if (pending.stillWorkingTimer) {
+            clearTimeout(pending.stillWorkingTimer);
+        }
+
+        const errorBlock = document.createElement('div');
+        errorBlock.className = 'error-message';
+        errorBlock.innerHTML = `<span>${this.escapeHtml(event.hint || 'Something went wrong. Try again.')}</span>`;
+        const retryButton = document.createElement('button');
+        retryButton.type = 'button';
+        retryButton.textContent = 'Try again';
+        retryButton.addEventListener('click', () => {
+            if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+                this.showConnectionBanner('Still connecting… please wait.');
+                return;
+            }
+            retryButton.disabled = true;
+            errorBlock.remove();
+            this.sendMessageText(pending.text);
+        });
+        errorBlock.appendChild(retryButton);
+        pending.turnElement.appendChild(errorBlock);
+        this.pendingTurns.delete(pending.id);
+        this.scrollToBottom();
+    }
+
+    showDecisionBar(messageElement, assistantMessageId) {
+        if (this.activeDecision && !this.activeDecision.submitted) {
+            this.activeDecision.element.remove();
+        }
+
+        const decisionElement = this.buildDecisionBlock(assistantMessageId);
+        messageElement.appendChild(decisionElement);
+        this.activeDecision = {
+            element: decisionElement,
+            messageId: assistantMessageId,
+            submitted: false,
+        };
+
+        const firstRadio = decisionElement.querySelector('input[type="radio"]');
+        if (firstRadio) {
+            requestAnimationFrame(() => firstRadio.focus());
+        }
+    }
+
+    buildDecisionBlock(assistantMessageId) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'decision-block';
+
+        const form = document.createElement('form');
+        form.className = 'decision-form';
+        form.setAttribute('data-assistant-id', assistantMessageId);
+
+        const fieldset = document.createElement('fieldset');
+
+        const legend = document.createElement('legend');
+        legend.textContent = 'What do you want to do with this result?';
+        fieldset.appendChild(legend);
+
+        const options = document.createElement('div');
+        options.className = 'decision-options';
+
+        const approveId = `decision-approve-${assistantMessageId}`;
+        const feedbackId = `decision-feedback-${assistantMessageId}`;
+
+        const approveLabel = document.createElement('label');
+        const approveRadio = document.createElement('input');
+        approveRadio.type = 'radio';
+        approveRadio.name = 'decision';
+        approveRadio.value = 'approved';
+        approveRadio.id = approveId;
+        approveLabel.htmlFor = approveId;
+        approveLabel.appendChild(approveRadio);
+        approveLabel.append('Approve');
+
+        const feedbackLabel = document.createElement('label');
+        const feedbackRadio = document.createElement('input');
+        feedbackRadio.type = 'radio';
+        feedbackRadio.name = 'decision';
+        feedbackRadio.value = 'feedback';
+        feedbackRadio.id = feedbackId;
+        feedbackLabel.htmlFor = feedbackId;
+        feedbackLabel.appendChild(feedbackRadio);
+        feedbackLabel.append('Give feedback');
+
+        options.appendChild(approveLabel);
+        options.appendChild(feedbackLabel);
+
+        fieldset.appendChild(options);
+
+        const feedbackWrapper = document.createElement('div');
+        feedbackWrapper.className = 'decision-feedback hidden';
+
+        const feedbackLabelElement = document.createElement('label');
+        feedbackLabelElement.setAttribute('for', `feedback-text-${assistantMessageId}`);
+        feedbackLabelElement.textContent = 'Tell us what to change…';
+
+        const feedbackTextarea = document.createElement('textarea');
+        feedbackTextarea.id = `feedback-text-${assistantMessageId}`;
+        feedbackTextarea.placeholder = 'Tell us what to change…';
+        feedbackTextarea.disabled = true;
+
+        feedbackWrapper.appendChild(feedbackLabelElement);
+        feedbackWrapper.appendChild(feedbackTextarea);
+
+        const actions = document.createElement('div');
+        actions.className = 'decision-actions';
+
+        const submitButton = document.createElement('button');
+        submitButton.type = 'submit';
+        submitButton.className = 'primary-btn';
+        submitButton.textContent = 'Submit';
+        submitButton.disabled = true;
+
+        const confirmation = document.createElement('span');
+        confirmation.className = 'decision-confirmation hidden';
+        confirmation.textContent = 'Thanks! We’ll take it from here.';
+
+        actions.appendChild(submitButton);
+        actions.appendChild(confirmation);
+
+        fieldset.appendChild(feedbackWrapper);
+        fieldset.appendChild(actions);
+
+        form.appendChild(fieldset);
+        wrapper.appendChild(form);
+
+        const toggleFeedback = () => {
+            if (feedbackRadio.checked) {
+                feedbackWrapper.classList.remove('hidden');
+                feedbackTextarea.required = true;
+                feedbackTextarea.disabled = false;
+                submitButton.disabled = !feedbackTextarea.value.trim();
+            } else {
+                feedbackWrapper.classList.add('hidden');
+                feedbackTextarea.required = false;
+                feedbackTextarea.disabled = true;
+                submitButton.disabled = !approveRadio.checked;
+            }
+        };
+
+        form.addEventListener('change', () => {
+            toggleFeedback();
+            if (!approveRadio.checked && !feedbackRadio.checked) {
+                submitButton.disabled = true;
+            }
+        });
+
+        feedbackTextarea.addEventListener('input', () => {
+            if (feedbackRadio.checked) {
+                submitButton.disabled = !feedbackTextarea.value.trim();
+            }
+        });
+
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const decisionValue = approveRadio.checked ? 'approved' : feedbackRadio.checked ? 'feedback' : null;
+            if (!decisionValue) {
+                return;
+            }
+
+            if (decisionValue === 'feedback' && !feedbackTextarea.value.trim()) {
+                feedbackTextarea.focus();
+                return;
+            }
+
+            submitButton.disabled = true;
+            approveRadio.disabled = true;
+            feedbackRadio.disabled = true;
+            feedbackTextarea.disabled = true;
+
+            this.submitDecision(assistantMessageId, decisionValue, feedbackTextarea.value.trim())
+                .then(() => {
+                    confirmation.classList.remove('hidden');
+                    submitButton.disabled = true;
+                    submitButton.textContent = 'Submitted';
+                    this.activeDecision.submitted = true;
+                })
+                .catch((error) => {
+                    console.error('Failed to submit decision', error);
+                    approveRadio.disabled = false;
+                    feedbackRadio.disabled = false;
+                    feedbackTextarea.disabled = !feedbackRadio.checked;
+                    submitButton.disabled = false;
+                });
+        });
+
+        // Ensure initial state
+        toggleFeedback();
+
+        return wrapper;
+    }
+
+    async submitDecision(assistantMessageId, decision, feedbackText) {
+        const payload = {
+            thread_id: this.threadId,
+            assistant_message_id: assistantMessageId,
+            decision,
+        };
+
+        if (decision === 'feedback' && feedbackText) {
+            payload.feedback_text = feedbackText;
+        }
+
+        const response = await fetch(`${this.apiBaseUrl}/frontend/decisions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Decision submission failed (${response.status})`);
+        }
+
+        return response.json();
+    }
+
+    appendSystemMessage(text) {
+        if (!text) {
+            return;
+        }
+        const container = document.createElement('div');
+        container.className = 'turn';
+        const message = document.createElement('div');
+        message.className = 'message assistant';
+        message.textContent = text;
+        container.appendChild(message);
+        this.messages.appendChild(container);
+        this.scrollToBottom();
+    }
+
+    buildUserMessage(text) {
+        const element = document.createElement('div');
+        element.className = 'message user';
+        element.textContent = text;
+        const timestamp = document.createElement('span');
+        timestamp.className = 'timestamp';
+        timestamp.textContent = this.formatTime(new Date());
+        element.appendChild(timestamp);
+        return element;
+    }
+
+    buildAssistantMessage(text, assistantMessageId, artifacts = []) {
+        const element = document.createElement('div');
+        element.className = 'message assistant';
+        element.setAttribute('data-assistant-id', assistantMessageId || '');
+        element.textContent = text;
+
+        if (artifacts && Array.isArray(artifacts) && artifacts.length > 0) {
+            const list = document.createElement('ul');
+            list.className = 'artifact-list';
+            artifacts.forEach((artifact) => {
+                const item = document.createElement('li');
+                if (artifact && artifact.url) {
+                    const link = document.createElement('a');
+                    link.href = artifact.url;
+                    link.textContent = artifact.label || artifact.url;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    item.appendChild(link);
+                } else if (artifact && artifact.label) {
+                    item.textContent = artifact.label;
+                }
+                list.appendChild(item);
+            });
+            element.appendChild(list);
+        }
+
+        const timestamp = document.createElement('span');
+        timestamp.className = 'timestamp';
+        timestamp.textContent = this.formatTime(new Date());
+        element.appendChild(timestamp);
+
+        return element;
+    }
+
+    buildTypingIndicator() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'typing-indicator';
+        wrapper.setAttribute('role', 'status');
+        wrapper.setAttribute('aria-live', 'polite');
+
+        const label = document.createElement('div');
+        label.textContent = 'Thinking…';
+
+        const dots = document.createElement('div');
+        dots.className = 'typing-dots';
+        dots.innerHTML = '<span></span><span></span><span></span>';
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(dots);
+
+        return wrapper;
+    }
+
+    startStillWorkingTimer(indicator) {
+        return setTimeout(() => {
+            if (!indicator.isConnected) {
+                return;
+            }
+            let note = indicator.querySelector('.typing-note');
+            if (!note) {
+                note = document.createElement('div');
+                note.className = 'typing-note';
+                note.textContent = 'Still working…';
+                indicator.appendChild(note);
+            }
+        }, this.stillWorkingDelay);
+    }
+
+    announceTyping() {
+        this.typingLiveRegion.textContent = 'Thinking…';
+        setTimeout(() => {
+            this.typingLiveRegion.textContent = '';
+        }, 1000);
     }
 
     scrollToBottom() {
-        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        this.messages.scrollTop = this.messages.scrollHeight;
+    }
+
+    generateMessageId() {
+        if (window.crypto && window.crypto.randomUUID) {
+            return window.crypto.randomUUID();
+        }
+        return `msg_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    generateAssistantMessageId() {
+        if (window.crypto && window.crypto.randomUUID) {
+            return `assistant_${window.crypto.randomUUID()}`;
+        }
+        return `assistant_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    latestPendingTurnId() {
+        const ids = Array.from(this.pendingTurns.keys());
+        return ids.length ? ids[ids.length - 1] : null;
+    }
+
+    oldestPendingTurnId() {
+        const iterator = this.pendingTurns.keys();
+        const first = iterator.next();
+        return first.done ? null : first.value;
+    }
+
+    formatTime(date) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
     escapeHtml(text) {
@@ -435,36 +766,14 @@ class HAILEIChat {
         div.textContent = text;
         return div.innerHTML;
     }
-
-    formatTime(date) {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
 }
 
-// Global function for quick actions
-function sendQuickMessage(message) {
-    if (window.haileiChat) {
-        window.haileiChat.sendQuickMessage(message);
-    }
-}
-
-// Initialize when page loads
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('Initializing HAILEI Chat...');
-    window.haileiChat = new HAILEIChat();
+window.addEventListener('DOMContentLoaded', () => {
+    window.singlePersonaChat = new SinglePersonaChat();
 });
 
-// Handle page visibility changes
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && window.haileiChat && !window.haileiChat.isConnected) {
-        console.log('Page became visible, checking connection...');
-        // Could implement reconnection logic here
-    }
-});
-
-// Handle beforeunload
 window.addEventListener('beforeunload', () => {
-    if (window.haileiChat && window.haileiChat.websocket) {
-        window.haileiChat.websocket.close(1000, 'Page unload');
+    if (window.singlePersonaChat && window.singlePersonaChat.websocket) {
+        window.singlePersonaChat.websocket.close(1000, 'Page unload');
     }
 });
