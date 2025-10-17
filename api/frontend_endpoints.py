@@ -1,18 +1,13 @@
-"""
-HAILEI Frontend-Ready API Endpoints
-
-Simplified and enhanced endpoints specifically designed for frontend integration.
-These endpoints provide streamlined data formats and enhanced functionality
-for direct consumption by web frontends.
-"""
+"""Frontend-aligned API endpoints for the HAILEI experience."""
 
 from datetime import datetime
+import logging
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .auth import get_current_user
-from .models import CourseRequest, UserPreferences
+from .models import CourseRequest
 from .websocket_manager import ConnectionManager
 
 # Orchestrator dependency injection
@@ -42,6 +37,24 @@ class QuickSessionResponse(BaseModel):
     status: str
     websocket_url: str
     timestamp: datetime
+
+
+class NewSessionRequest(BaseModel):
+    """Minimal payload for creating a conversational session."""
+
+    display_name: Optional[str] = Field(
+        default=None,
+        description="Optional display name shared with the assistant greeting.",
+        max_length=100,
+    )
+
+    @field_validator("display_name")
+    @classmethod
+    def strip_display_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class ChatMessage(BaseModel):
@@ -85,55 +98,141 @@ class WorkflowProgress(BaseModel):
     estimated_completion: Optional[datetime] = None
 
 
-@frontend_router.post("/quick-start", response_model=QuickSessionResponse)
-async def quick_start_session(
-    course_request: SimpleCourseRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Quick start endpoint for frontend - creates session with minimal data
-    """
+class DecisionSubmission(BaseModel):
+    """Approval or feedback decision submitted from the frontend."""
+
+    thread_id: str = Field(..., description="Session/thread identifier for the decision.")
+    assistant_message_id: str = Field(
+        ..., description="Identifier of the assistant message receiving the decision."
+    )
+    decision: str = Field(
+        ..., description="Decision value", pattern="^(approved|feedback)$"
+    )
+    feedback_text: Optional[str] = Field(
+        default=None,
+        description="Feedback text supplied when the decision is 'feedback'.",
+    )
+
+    @field_validator("feedback_text")
+    @classmethod
+    def validate_feedback(cls, value: Optional[str], values: Dict[str, Any]):
+        decision = values.get("decision")
+        if decision == "feedback":
+            if not value or not value.strip():
+                raise ValueError("Feedback text is required when decision is 'feedback'.")
+            return value.strip()
+        return value.strip() if value else None
+
+
+def _build_default_course_request(display_name: Optional[str] = None) -> CourseRequest:
+    """Create a baseline course request when the UI starts a new session without details."""
+
+    base_title = "New Learning Journey"
+    if display_name:
+        base_title = f"{display_name}'s Learning Journey"
+
+    return CourseRequest(
+        course_title=base_title,
+        course_level="general",
+        course_duration_weeks=8,
+        course_description="Auto-generated session from the frontend chat interface.",
+        target_audience="General learners",
+        prerequisites=None,
+        learning_outcomes=[],
+        special_requirements={},
+    )
+
+
+async def _start_orchestrator_session(course_request: CourseRequest) -> QuickSessionResponse:
+    """Helper to start a conversation and return a standardized response payload."""
+
     if not orchestrator:
         raise HTTPException(status_code=503, detail="System not ready")
-    
+
     try:
-        # Convert simple request to full course request
-        full_request = CourseRequest(
-            course_title=course_request.title,
-            course_level=course_request.level,
-            course_duration_weeks=course_request.duration,
-            course_description=course_request.description,
-            target_audience="General learners",  # Default value
-            prerequisites=None,  # Optional
-            learning_outcomes=[],  # Will be generated
-            special_requirements={}  # Default empty dict
-        )
-        
-        # Create session
         session_id = await orchestrator.start_conversation(
-            course_request=full_request.model_dump()
+            course_request=course_request.model_dump()
         )
-        
-        # Initialize session logger
+
         try:
             from .main import get_session_logger
+
             session_logger = get_session_logger(session_id)
-            session_logger.log(f"Quick-start session created: {session_id}")
-            session_logger.log(f"Course request: {course_request.model_dump()}")
-        except Exception as e:
-            logging.error(f"Failed to initialize session logger: {e}")
-        
-        # User preferences could be added later via separate endpoint
-        
+            session_logger.log(f"Session created: {session_id}")
+            session_logger.log(
+                f"Course request: {course_request.model_dump(exclude_none=True)}"
+            )
+        except Exception as exc:  # pragma: no cover - logging best-effort
+            logging.error("Failed to initialize session logger: %s", exc)
+
         return QuickSessionResponse(
             session_id=session_id,
             status="ready",
             websocket_url=f"/ws/{session_id}",
             timestamp=datetime.now()
         )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start session: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=500, detail=f"Failed to start session: {exc}")
+
+
+@frontend_router.post("/new-session", response_model=QuickSessionResponse)
+async def create_new_session(
+    request: Optional[NewSessionRequest] = Body(default=None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a new conversational session with minimal required data."""
+
+    course_request = _build_default_course_request(
+        request.display_name if request else None
+    )
+    return await _start_orchestrator_session(course_request)
+
+
+@frontend_router.post("/quick-start", response_model=QuickSessionResponse)
+async def quick_start_session(
+    course_request: SimpleCourseRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Quick start endpoint that accepts a fully described course payload."""
+
+    full_request = CourseRequest(
+        course_title=course_request.title,
+        course_level=course_request.level,
+        course_duration_weeks=course_request.duration,
+        course_description=course_request.description,
+        target_audience="General learners",
+        prerequisites=None,
+        learning_outcomes=[],
+        special_requirements={},
+    )
+
+    return await _start_orchestrator_session(full_request)
+
+
+@frontend_router.post("/decisions")
+async def submit_decision(
+    submission: DecisionSubmission,
+    current_user: dict = Depends(get_current_user)
+):
+    """Record an approval or feedback decision from the chat UI."""
+
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="System not ready")
+
+    logging.info(
+        "Frontend decision received for %s: %s",
+        submission.assistant_message_id,
+        submission.decision,
+    )
+
+    # Future enhancement: forward to orchestrator approval/feedback pipeline.
+    return {
+        "status": "received",
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
 @frontend_router.post("/chat/{session_id}", response_model=ChatResponse)

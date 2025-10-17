@@ -3,109 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HAILEI Chat - Test Interface</title>
+    <title>HAILEI Single Persona Chat</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="app-header">
-            <h1>🎓 HAILEI Chat</h1>
-            <p>Conversational AI Course Design System</p>
-            <div class="status-indicator" id="status">
-                <span class="status-dot offline"></span>
-                <span id="status-text">Disconnected</span>
+    <div class="app-shell">
+        <header class="app-header" role="banner">
+            <div class="brand">
+                <span class="brand-avatar" aria-hidden="true">🎓</span>
+                <div class="brand-copy">
+                    <h1>HAILEI Assistant</h1>
+                    <p>Your partner for course design conversations.</p>
+                </div>
+            </div>
+            <div class="connection-summary" id="connection-summary">
+                <span class="status-dot offline" id="status-dot" aria-hidden="true"></span>
+                <span id="status-label">Offline</span>
             </div>
         </header>
 
-        <!-- Course Setup (Initial) -->
-        <div class="setup-container" id="setup-container">
-            <div class="setup-card">
-                <h2>Start Your Course Design</h2>
-                <form id="course-form">
-                    <div class="form-group">
-                        <label for="course-title">Course Title</label>
-                        <input type="text" id="course-title" placeholder="e.g., Introduction to Machine Learning" required>
+        <main class="app-main">
+            <section id="start-screen" class="start-screen" aria-labelledby="start-title">
+                <div class="start-card">
+                    <h2 id="start-title">Begin a new conversation</h2>
+                    <p>Start a fresh thread when you’re ready to design your next learning experience.</p>
+                    <button id="new-session-btn" class="primary-btn">New Session</button>
+                </div>
+            </section>
+
+            <section id="build-screen" class="build-screen hidden" aria-live="polite">
+                <div class="session-banner">
+                    <div class="assistant-identity">
+                        <span class="assistant-avatar" aria-hidden="true">🎓</span>
+                        <div>
+                            <h2 class="assistant-name">HAILEI Assistant</h2>
+                            <p class="assistant-tagline">Single voice guidance for every step.</p>
+                        </div>
                     </div>
-                    
-                    <div class="form-group">
-                        <label for="course-level">Level</label>
-                        <select id="course-level" required>
-                            <option value="">Select level...</option>
-                            <option value="beginner">Beginner</option>
-                            <option value="intermediate">Intermediate</option>
-                            <option value="advanced">Advanced</option>
-                        </select>
+                    <div class="session-meta">
+                        <span class="session-label">Thread</span>
+                        <span id="thread-badge" class="session-id">—</span>
                     </div>
-                    
-                    <div class="form-group">
-                        <label for="course-duration">Duration (weeks)</label>
-                        <input type="number" id="course-duration" min="1" max="52" placeholder="8" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="course-description">Description</label>
-                        <textarea id="course-description" rows="3" 
-                                placeholder="Brief description of what this course will cover..." required></textarea>
-                    </div>
-                    
-                    <button type="submit" class="start-btn">Start Conversation</button>
+                </div>
+
+                <div class="chat-surface" role="region" aria-label="Conversation">
+                    <div id="messages" class="message-log" role="log" aria-live="polite" aria-relevant="additions"></div>
+                </div>
+
+                <div id="typing-live-region" class="sr-only" aria-live="polite"></div>
+
+                <div id="connection-banner" class="connection-banner hidden" role="status">
+                    <span id="connection-banner-text"></span>
+                </div>
+
+                <form id="composer" class="composer" novalidate>
+                    <label class="sr-only" for="message-input">Your message</label>
+                    <textarea id="message-input" name="message" rows="3" placeholder="Type your message..." autocomplete="off" disabled required></textarea>
+                    <button id="send-btn" type="submit" class="primary-btn" disabled>Send</button>
                 </form>
-            </div>
-        </div>
-
-        <!-- Chat Interface (Hidden initially) -->
-        <div class="chat-container" id="chat-container" style="display: none;">
-            
-            <!-- Agent Status Bar -->
-            <div class="agent-status" id="agent-status">
-                <div class="agent-info">
-                    <span class="agent-icon">🤖</span>
-                    <span class="agent-name" id="active-agent">Coordinator</span>
-                    <span class="agent-role" id="agent-role">Course Planning</span>
-                </div>
-                <div class="session-info">
-                    <span class="session-id" id="session-display">Session: Not started</span>
-                </div>
-            </div>
-
-            <!-- Messages Area -->
-            <div class="messages-container" id="messages-container">
-                <div class="welcome-message">
-                    <div class="agent-avatar">🎓</div>
-                    <div class="message-content">
-                        <strong>Welcome to HAILEI!</strong><br>
-                        I'm your AI course design coordinator. I'll guide you through creating an amazing educational experience 
-                        with help from our specialist agents.
-                    </div>
-                </div>
-            </div>
-
-            <!-- Input Area -->
-            <div class="input-container">
-                <div class="input-wrapper">
-                    <input type="text" id="message-input" placeholder="Type your message..." 
-                           autocomplete="off" disabled>
-                    <button id="send-btn" disabled>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z"/>
-                        </svg>
-                    </button>
-                </div>
-                
-                <!-- Quick Actions -->
-                <div class="quick-actions" id="quick-actions" style="display: none;">
-                    <button class="quick-btn" onclick="sendQuickMessage('I approve this output')">✅ Approve</button>
-                    <button class="quick-btn" onclick="sendQuickMessage('Can you refine this?')">🔧 Refine</button>
-                    <button class="quick-btn" onclick="sendQuickMessage('Move to next specialist')">➡️ Next Phase</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Connection Status -->
-        <div class="connection-status" id="connection-status" style="display: none;">
-            <span id="connection-message">Connecting...</span>
-        </div>
+            </section>
+        </main>
     </div>
 
     <script src="script.js"></script>
